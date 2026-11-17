@@ -2,7 +2,7 @@
 <html lang="ja"><head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Conveyor Brush</title>
+  <title>PLAY with Maker</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -36,39 +36,71 @@
     #pane-holder .tp-rotv_m { display: none; }
     #pane-holder .tp-fldv_b { pointer-events: none; }
     #pane-holder .tp-fldv_m { display: none; }
+    #pane-holder .tp-ckbv_l { display: flex; justify-content: flex-end; } /* チェックボックスを右端に揃える */
     #pane-holder .tp-rotv_t { font-size: 13px; line-height: 40px; }
     #pane-holder .tp-btnv_b { height: 28px; }
     #sketch-holder { min-width: 0; display: flex; align-items: center; justify-content: center; height: 100vh; }
-    #preview-holder { height: 100vh; overflow-y: auto; background: var(--gui-bg); font-family: 'IBM Plex Mono', monospace; color: var(--gui-label-fg); }
-    .tile-slot { padding: 12px 4px 0 0; }
-    .tile-slot-label { font-size: 11px; margin-bottom: 6px; }
-    .tile-slot-drop { position: relative; width: calc(100% - 4px); aspect-ratio: 1; box-sizing: border-box; display: flex; align-items: center; justify-content: center; border: 1px dashed #999; cursor: pointer;
-      background: repeating-conic-gradient(#e6e6e6 0% 25%, #fff 0% 50%) 50% / 16px 16px; }
-    .tile-slot-drop.over { border-color: #242424; background-color: #d0d0d0; }
-    .tile-slot-drop img { width: 60%; aspect-ratio: 1; object-fit: contain; pointer-events: none; } /* 箱の90%角に収め、拡大縮小して長辺が箱の90%になる */
-    .tile-slot-drop span { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; font-size: 10px; color: #666; pointer-events: none; }
-    .tile-slot-drop img { display: none; }
-    .tile-slot-drop.filled img { display: block; }
-    .tile-slot-drop.filled span { display: none; }
+    #right-pane { display: flex; flex-direction: column; height: 100vh; min-width: 0; background: var(--gui-bg); font-family: 'IBM Plex Mono', monospace; color: var(--gui-label-fg); }
+    #preview-holder { flex: 1; min-height: 0; overflow-y: auto; background: var(--gui-bg); font-family: 'IBM Plex Mono', monospace; color: var(--gui-label-fg); }
+    .tile-slot { padding: 6px 4px 0 0; }
+    .tile-slot-drop { position: relative; width: calc(100% - 4px); height: 100px; box-sizing: border-box; display: flex; align-items: center; gap: 10px; padding: 6px; cursor: pointer; background: #fff; }
+    .tile-slot-drop.over { background-color: #d0d0d0; }
+    .tile-slot-thumb { flex: none; width: 88px; height: 88px; display: flex; align-items: center; justify-content: center;
+      background: repeating-conic-gradient(#e6e6e6 0% 25%, #fff 0% 50%) 50% / 10px 10px; }
+    .tile-slot-thumb img { display: none; max-width: 100%; max-height: 100%; object-fit: contain; pointer-events: none; }
+    .tile-slot-drop.filled .tile-slot-thumb img { display: block; }
+    .tile-slot-info { min-width: 0; display: flex; flex-direction: column; gap: 2px; pointer-events: none; }
+    .tile-slot-label { font-size: 11px; }
+    .tile-slot-hint { font-size: 10px; color: #666; white-space: nowrap; }
+    .tile-slot-drop.filled .tile-slot-hint { display: none; }
     .tile-slot-close { position: absolute; top: 4px; right: 4px; width: 20px; height: 20px; padding: 0; border: 0; background: var(--gui-button-bg); color: var(--gui-button-fg); font: 12px/20px 'IBM Plex Mono', monospace; text-align: center; cursor: pointer; opacity: 0; pointer-events: none; }
     .tile-slot-drop.can-remove:hover .tile-slot-close { opacity: 1; pointer-events: auto; }
     .tile-slot-close:hover { background: var(--gui-button-bg-hover); }
-    .tile-add { display: block; width: calc(100% - 4px); height: 28px; margin: 12px 0 12px; padding: 0; border: 0; background: var(--gui-button-bg); color: var(--gui-button-fg); font: 14px 'IBM Plex Mono', monospace; cursor: pointer; }
+    .tile-add { display: block; width: calc(100% - 4px); height: 28px; margin: 6px 0 12px; padding: 0; border: 0; background: var(--gui-button-bg); color: var(--gui-button-fg); font: 14px 'IBM Plex Mono', monospace; cursor: pointer; }
     .tile-add:hover { background: var(--gui-button-bg-hover); }
     .tile-add:active { background: var(--gui-button-bg-active); }
+    .pad { padding: 12px 4px 12px 0; flex: none; }
+    .pad-label { font-size: 11px; margin-bottom: 3px; }
+    #pad-canvas { width: calc(100% - 4px); aspect-ratio: 1; box-sizing: border-box; border: 1px dashed #999; cursor: none; touch-action: none;
+      background: repeating-conic-gradient(#e6e6e6 0% 25%, #fff 0% 50%) 50% / 16px 16px; }
+    #pad-cursor { position: fixed; display: none; box-sizing: border-box; border: 1px solid #b0b0b0; border-radius: 50% !important; pointer-events: none; transform: translate(-50%, -50%); z-index: 10; }
+    .pad-row { display: flex; gap: 4px; width: calc(100% - 4px); margin-top: 4px; align-items: center; }
+    .pad-row button { flex: 1; height: 28px; padding: 0; border: 0; background: var(--gui-button-bg); color: var(--gui-button-fg); font: 11px 'IBM Plex Mono', monospace; cursor: pointer; }
+    .pad-row button:hover { background: var(--gui-button-bg-hover); }
+    .pad-row button.active { background: var(--gui-button-bg-hover); font-weight: 500; }
+    .pad-row button:disabled { opacity: 0.4; cursor: default; }
+    .pad-row input[type=color]::-webkit-color-swatch-wrapper { padding: 0; }
+    .pad-row input[type=color]::-webkit-color-swatch { border: 0; }
+    .pad-row input[type=color]::-moz-color-swatch { border: 0; }
+    .pad-row input[type=color] { flex: none; width: 28px; height: 28px; padding: 0; border: 0; background: var(--gui-button-bg); cursor: pointer; }
+    #sketch-holder canvas { width: min(100%, calc(100vh * var(--canvas-ar, 1)), var(--canvas-w, 100%)) !important; height: auto !important; aspect-ratio: var(--canvas-ar, 1); } /* 窓に収まらないときだけ縮小表示(原寸より大きくはしない・縦横比は保つ) */
     canvas { display: block; }
   </style>
 </head>
 <body>
   <div id="pane-holder"></div>
   <div id="sketch-holder"></div>
-  <div id="preview-holder"></div>
+  <div id="right-pane">
+    <div class="pad">
+      <div class="pad-label">Canvas</div>
+      <canvas id="pad-canvas" width="256" height="256"></canvas>
+      <div id="pad-cursor"></div>
+      <div class="pad-row">
+        <input type="color" id="pad-color" value="#000000">
+        <button type="button" id="pad-pen" class="active">Pen</button>
+        <button type="button" id="pad-eraser">Eraser</button>
+        <button type="button" id="pad-fill">Fill</button>
+        <button type="button" id="pad-clear">Clear</button>
+      </div>
+      <div class="pad-row"><button type="button" id="pad-add">Add to pieces</button></div>
+    </div>
+    <div id="preview-holder"></div>
+  </div>
   <script src="https://cdn.jsdelivr.net/npm/p5@1.11.2/lib/p5.js"></script>
   <script type="module">
     import { Pane } from 'https://cdn.jsdelivr.net/npm/tweakpane@4.0.4/dist/tweakpane.min.js';
     window.Tweakpane = { Pane };
   </script>
-  <script src="libs/clipper.js"></script> <!-- Clipper 6.4.2 (Boost License)。SVG書き出し時に線の太さの外形を作る -->
   <script src="svg-path.js"></script>
   <script src="sketch.js" defer></script>
 </body></html>
