@@ -60,6 +60,7 @@
     .tile-add:hover { background: var(--gui-button-bg-hover); }
     .tile-add:active { background: var(--gui-button-bg-active); }
     .pad { padding: 12px 4px 12px 0; flex: none; }
+    .pad-shuffle { padding-top: 0; }
     .pad-label { font-size: 11px; margin-bottom: 3px; }
     #pad-canvas { width: calc(100% - 4px); aspect-ratio: 1; box-sizing: border-box; border: 1px dashed #999; cursor: none; touch-action: none;
       background: repeating-conic-gradient(#e6e6e6 0% 25%, #fff 0% 50%) 50% / 16px 16px; }
@@ -94,13 +95,17 @@
       </div>
       <div class="pad-row"><button type="button" id="pad-add">Add to pieces</button></div>
     </div>
+    <div class="pad pad-shuffle"><div class="pad-row"><button type="button" id="shuffle-colors">Shuffle piece colors</button></div></div>
     <div id="preview-holder"></div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/p5@1.11.2/lib/p5.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/p5.capture@1.6.1/dist/p5.capture.umd.min.js"></script>
   <script type="module">
     import { Pane } from 'https://cdn.jsdelivr.net/npm/tweakpane@4.0.4/dist/tweakpane.min.js';
     window.Tweakpane = { Pane };
   </script>
+  <script>window.EASING_SELECTOR_AUTO = false; /* ライブラリ標準のパネルは出さず、左パネルのプルダウンで選ぶ */</script>
+  <script src="easingSelector.js"></script>
   <script src="svg-path.js"></script>
   <script src="sketch.js" defer></script>
 </body></html>

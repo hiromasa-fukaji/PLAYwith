@@ -25,14 +25,20 @@ let baseImgs = {};  // モードごとの背景画像 { base, insta }
 let canvasMode;     // 今のキャンバスモード('base' | 'insta')
 
 // --- キャンバスサイズ ---
+// path が配列のモード(workshop など)は、SVGごとに別々のスライダー値(Piece / Jitter など)を持つ
 // モードごとのキャンバスサイズ・背景画像・初期パス(SVG)
+// ピースは Pieces/<フォルダ>/piece1<接尾辞>.svg, piece2..., と番号順に探し、見つかった分だけ読み込む(最大 MAX_PIECES 個)
+function pieceFiles(folder, suffix) {
+  return n => `Pieces/${folder}/piece${n}${suffix}.svg`;
+}
+
 const CANVAS_MODES = {
-  blank: { w: 960, h: 640,  img: null,        path: null },        // 画像もパスも読み込まない真っ白モード
-  base:  { w: 960, h: 640,  img: 'base.jpg',  path: 'base.svg' },
-  insta: { w: 756, h: 945,  img: 'insta.jpg', path: 'insta.svg' },
-  session: { w: 756, h: 945, img: 'session.jpg', path: 'session.svg' }, // talk session
-  workshop: { w: 756, h: 945, img: 'workshop.jpg', path: 'workshop.svg' },
-  crosstalk: { w: 756, h: 945, img: 'crosstalk.jpg', path: 'crosstalk.svg' },
+  blank: { w: 960, h: 640,  img: null,        path: null, pieces: pieceFiles('blank', '') },        // 画像もパスも読み込まない真っ白モード
+  base:  { w: 960, h: 640,  img: 'bg/base.jpg',  path: ['SVG/base_1.svg', 'SVG/base_2.svg'], pieces: pieceFiles('base', '_base') },
+  insta: { w: 756, h: 945,  img: 'bg/insta.jpg', path: ['SVG/insta_1.svg', 'SVG/insta_2.svg'], pieces: pieceFiles('insta', '_insta') },
+  session: { w: 756, h: 945, img: 'bg/session.jpg', path: 'SVG/session.svg', pieces: pieceFiles('talksession', '_talksession') }, // talk session
+  workshop: { w: 756, h: 945, img: 'bg/workshop.jpg', path: ['SVG/workshop_1.svg', 'SVG/workshop_2.svg'], pieces: pieceFiles('workshop', '_workshop') },
+  crosstalk: { w: 756, h: 945, img: 'bg/crosstalk.jpg', path: 'SVG/crosstalk.svg', pieces: pieceFiles('crosstalk', '_crosstalk') },
 };
 
 // --- 見た目・動きの調整パラメータ ---
@@ -40,18 +46,25 @@ const CANVAS_MODES = {
 // 毎フレーム syncParams() で下のグローバル変数へ写して使う。
 const PARAMS = {
   canvasMode:     'base', // キャンバスのサイズと背景画像: 'base'(960×640) | 'insta'(756×945) | 'session'(756×945) | 'workshop'(756×945) | 'crosstalk'(756×945)
-  circleDiameter: 70,    // 円の直径(px)
+  circleDiameter: 60,    // 円の直径(px)
   circleGapRatio: -0.6, // 円と円の間隔(円の直径に対する比率)。0なら隙間なしでぴったり並ぶ。-1に近いほど重なる
-  beltSpeed:      0.4,   // 1フレームあたりの移動量(px)
+  beltSpeed:      0.5,   // 1フレームあたりの移動量(px)
+  appearSec:      2,   // リロード時、ピースが1pxから設定の大きさまで育つ秒数
+  noiseFreq:      10,     // イージング noise の山の数(小さいほどゆっくり。ライブラリ標準は20)
+  appearMax:      120,    // 出現アニメの最大サイズ(px)。育ち切ったあとは piece size に戻る
+  appearSettleSec: 1,    // appear max から piece size へ落ち着くまでの秒数
+  appearEase:     'easeInOutSine', // 出現アニメーションのイージング(easingSelector.js の名前)
+  appearFps:      8,    // 出現アニメーションのコマ数(1秒あたり)。小さいほどカクカク育つ
   trackWidth:     400,    // トラック(ストローク)の太さ
   minPointDist:   50,     // ドラッグ中、前の点からこの距離以上動いたら新しい点を追加する(px)
   jitterAmount:   0.0,     // レール(進行方向)に垂直な向きへのずれの最大値(px)。0でずれなし
   ampLoop:        true, // true: amountが 設定値→最大値→設定値 をループする
   ampMax:         200,   // ループの最大値(px)
-  ampSec:         3,     // 1往復(設定値→最大値→設定値)にかける秒数
-  ampFps:         6,    // amountループのコマ数(1秒あたり)。小さいほどカクカク動く
+  ampSec:         3.5,     // 1往復(設定値→最大値→設定値)にかける秒数
+  ampFps:         20,    // amountループのコマ数(1秒あたり)。小さいほどカクカク動く
+  ampEase:        'easeInOutSine', // amountの 設定値→最大値 の片道のイージング(戻りは逆再生)
   ampWait:        3,     // 1往復のあと、設定値のまま待つ秒数(インターバル)
-  randomSeed:     413,     // ランダム配置の乱数の種(変えると並びが変わる)
+  randomSeed:     934,     // ランダム配置の乱数の種(変えると並びが変わる)
   randomOrder:    true, // true: ピースを交互ではなくランダムな順番で配置する
   rotLoop:        true, // true: 回転が 最小→最大→(静止)→最小→(静止) をループする
   rotMin:         0,  // ループの最小値(度)
@@ -72,6 +85,63 @@ const PARAMS = {
 };
 
 const DEFAULT_PARAMS = { ...PARAMS }; // Reset用の初期値(localStorage復元より前に控える)
+
+// ------------------------------------------------------------
+// パスごとの個別スライダー
+// 初期パスが複数あるモードでは、下の「共通」以外のスライダーを、パスごとに別々の値で持つ。
+// pathSlots[i] = パス i のスライダー値。GUIが書き換える PARAMS には、選んでいるパス(curPath)の値が入る。
+// 描くときは、線ごとにそのパスの値を PARAMS に入れ替えて(usePathParams)描き、終わったら選択中の値へ戻す
+// ------------------------------------------------------------
+const GLOBAL_KEYS = ['canvasMode', 'minPointDist', 'showTrack', 'showImage', 'bkgdColor', 'trackColor']; // 全パス共通(fillPath・fillColor・circleColor はパスごと)
+const PER_PATH_KEYS = Object.keys(DEFAULT_PARAMS).filter(k => !GLOBAL_KEYS.includes(k));
+// パスごとの初期値(DEFAULT_PARAMS からの差分だけ書く)。モード名 → [パス0の差分, パス1の差分, ...]
+// 保存された値がないとき、および Reset Params のときに使う
+const PATH_DEFAULTS = {
+  workshop: [
+    {},                                                                         // workshop_1: 共通の初期値のまま
+    { circleDiameter: 40, beltSpeed: 0.4, appearMax: 80, appearFps: 6 },        // workshop_2
+  ],
+};
+function pathDefaultsOf(name, i) { return ((PATH_DEFAULTS[name] || [])[i]) || {}; }
+
+let pathCount = 1;      // 今のモードの初期パスの数
+let curPath = 0;        // GUIで選んでいるパス
+let pathSlots = [];     // パスごとのスライダー値
+let activePath = 0;     // 今、描いている(使っている)パス。ピースの色違い(pathVar)の選択に使う
+let beltOffsets = [0];  // パスごとのコンベアの位置(パスごとに speed が違っても、それぞれ流れる)
+
+function pathUrlsOf(name) { return [].concat(CANVAS_MODES[name].path || []); }
+function pathCountOf(name) { return Math.max(1, pathUrlsOf(name).length); }
+
+function pickPathParams() {
+  const o = {};
+  for (const k of PER_PATH_KEYS) o[k] = PARAMS[k];
+  return o;
+}
+
+// モード name のパス用スライダー値を用意する。saved に保存があれば、それを使う(型が違う項目は初期値)
+function setupPathSlots(name, saved) {
+  pathCount = pathCountOf(name);
+  const base = pickPathParams(); // 今の PARAMS(= 保存の復元後、または前のモードから引き継いだ値)
+  curPath = Math.min(pathCount - 1, Math.max(0, (saved && saved.__sel) | 0));
+  pathSlots = Array.from({ length: pathCount }, (_, i) => {
+    const o = { ...base, ...pathDefaultsOf(name, i) };
+    const sv = saved && saved.__paths && saved.__paths[i];
+    if (sv) for (const k of PER_PATH_KEYS) if (typeof sv[k] === typeof DEFAULT_PARAMS[k]) o[k] = sv[k];
+    return o;
+  });
+  Object.assign(PARAMS, pathSlots[curPath]);
+  activePath = curPath;
+  beltOffsets = Array(pathCount).fill(0);
+}
+
+// i 番目のパスの値を PARAMS とグローバル変数に入れる(描画の直前に使う)
+function usePathParams(i) {
+  activePath = i;
+  Object.assign(PARAMS, pathSlots[i]);
+  deriveGlobals();
+  beltOffset = beltOffsets[i];
+}
 
 const CURVE_STEPS = 32;   // SVGパス読み込み用:曲線1本あたりの分割数
 const SIMPLIFY_EPSILON = 0.5; // SVG書き出し時、線の点を間引く許容誤差(px)
@@ -97,17 +167,23 @@ const modeParams = {};
 // 保存のある項目だけ入れ替え、型が違う・足りない項目は初期値にする
 function applyModeParams(name) {
   const saved = modeParams[name];
-  if (!saved) return;
+  if (!saved) { setupPathSlots(name, null); return; } // 保存がなければ、今の値をどのパスにも引き継ぐ
   for (const key of Object.keys(DEFAULT_PARAMS)) {
     if (key === 'canvasMode') continue;
     PARAMS[key] = typeof saved[key] === typeof DEFAULT_PARAMS[key] ? saved[key] : DEFAULT_PARAMS[key];
   }
+  setupPathSlots(name, saved);
 }
 
 // 今の PARAMS(canvasMode 以外)を、モード name の値として控える
 function snapshotParams(name) {
   const snap = {};
   for (const key of Object.keys(PARAMS)) if (key !== 'canvasMode') snap[key] = PARAMS[key];
+  if (pathCount > 1) { // パスごとの値も控える
+    pathSlots[curPath] = pickPathParams();
+    snap.__paths = pathSlots.map(o => ({ ...o }));
+    snap.__sel = curPath;
+  }
   modeParams[name] = snap;
 }
 
@@ -141,17 +217,33 @@ function saveParams() {
   } catch (e) {}
 }
 
+// easingSelector.js のイージング名を、Tweakpaneのプルダウン用 { 名前: 名前 } にする
+function easingOptions() {
+  return Object.fromEntries(getEasingNames().map(n => [n, n]));
+}
+
+// 動きの「0→1」に使うイージング。
+// noise / pulse / beat / heartbeat 系は、そのままだと 0→山→0 で終わる(終点が0に戻る)ので、
+// 動きの終わりで値がパッと飛んでしまう。そこで、直線(0→1)にその揺れを足して、必ず 0 から始まり 1 で終わるようにする
+const RETURN_TO_ZERO_EASINGS = ['noise', 'pulse', 'beat', 'heartbeat', 'heartbeat_enhanced'];
+function ease01(u, name) {
+  u = Math.max(0, Math.min(1, u));
+  const v = applyEasing(u, name);
+  return RETURN_TO_ZERO_EASINGS.includes(name) ? u + v : v;
+}
+
 // 回転のループ: 最小→最大(移動)→2秒静止→最大→最小(移動)→2秒静止 を繰り返す
 const ROT_HOLD_MS = 2000;
 function loopedRotation() {
   const move = Math.max(1, PARAMS.rotMoveSec * 1000);
   // コマ数を減らすため、時間をコマ(1000/rotFps ms)の単位に切り捨ててから角度を求める
   const frame = 1000 / Math.max(1, PARAMS.rotFps);
-  const t = Math.floor(millis() / frame) * frame % (2 * (move + ROT_HOLD_MS));
+  const t = Math.floor(animMs() / frame) * frame % (2 * (move + ROT_HOLD_MS));
   const a = PARAMS.rotMin, b = PARAMS.rotMax;
-  if (t < move) return a + (b - a) * (t / move);                    // 最小→最大
+  const ez = u => u; // 回転の移動はリニア(イージングなし)
+  if (t < move) return a + (b - a) * ez(t / move);                  // 最小→最大
   if (t < move + ROT_HOLD_MS) return b;                              // 最大で静止
-  if (t < 2 * move + ROT_HOLD_MS) return b + (a - b) * ((t - move - ROT_HOLD_MS) / move); // 最大→最小
+  if (t < 2 * move + ROT_HOLD_MS) return b + (a - b) * ez((t - move - ROT_HOLD_MS) / move); // 最大→最小
   return a;                                                          // 最小で静止
 }
 
@@ -160,17 +252,25 @@ function loopedAmount() {
   const move = Math.max(0.1, PARAMS.ampSec) * 1000;
   const wait = Math.max(0, PARAMS.ampWait) * 1000;
   const frame = 1000 / Math.max(1, PARAMS.ampFps); // コマ数を減らすため、時間をコマ単位に切り捨てる
-  const t = Math.floor(millis() / frame) * frame % (move + wait);
+  const t = Math.floor(animMs() / frame) * frame % (move + wait);
   if (t >= move) return PARAMS.jitterAmount;         // インターバル中は設定値のまま
-  const k = 0.5 - 0.5 * Math.cos((t / move) * 2 * Math.PI); // 0→1→0
+  // 前半で 設定値→最大値(イージング)、後半で逆再生して 最大値→設定値
+  const half = move / 2;
+  const k = t < half ? ease01(t / half, PARAMS.ampEase) : ease01(1 - (t - half) / half, PARAMS.ampEase);
   return PARAMS.jitterAmount + (PARAMS.ampMax - PARAMS.jitterAmount) * k;
 }
 
 // PARAMS -> グローバル変数へ反映。太さ・色が変わったときだけバッファを作り直す
 function syncParams() {
   if (canvasMode && PARAMS.canvasMode !== canvasMode) applyCanvasMode(PARAMS.canvasMode);
-  const colorChanged = PARAMS.circleColor !== circleColor;
+  if (pathCount > 1) pathSlots[curPath] = pickPathParams(); // GUIで選んでいるパスの値を控える
 
+  deriveGlobals(); // ピースの色は、使うときに色ごとに作る(tintedSet)
+}
+
+// PARAMS -> グローバル変数へ反映
+function deriveGlobals() {
+  setNoiseScale(PARAMS.noiseFreq);
   CIRCLE_DIAMETER = PARAMS.circleDiameter;
   CIRCLE_GAP      = PARAMS.circleGapRatio * PARAMS.circleDiameter; // 直径に比例した間隔(px)
   BELT_SPEED      = PARAMS.beltSpeed;
@@ -183,15 +283,13 @@ function syncParams() {
   ZONE_SCALE      = PARAMS.zoneScale;
   ZONE_THRESHOLD  = PARAMS.zoneThreshold;
   ZONE_SOFTNESS   = PARAMS.zoneSoftness;
-  SHOW_TRACK      = PARAMS.showTrack;
+  SHOW_TRACK      = false; // GUIを削除。トラックの縁取りは常に非表示(PARAMS.showTrack の保存値は使わない)
   SHOW_IMAGE      = PARAMS.showImage;
   FILL_PATH       = PARAMS.fillPath;
   FILL_COLOR      = PARAMS.fillColor;
   bkgdColor       = PARAMS.bkgdColor;
   trackColor      = PARAMS.trackColor;
   circleColor     = PARAMS.circleColor;
-
-  if (colorChanged && pieces.some(Boolean)) buildTintedImages();
 }
 
 // ------------------------------------------------------------
@@ -204,6 +302,7 @@ function setupPane() {
   });
 
   const canvasFolder = pane.addFolder({ title: 'Canvas' });
+  canvasFolderRef = canvasFolder;
   canvasFolder.addBinding(PARAMS, 'canvasMode', {
     label: 'mode',
     options: { 'blank (960×640)': 'blank', 'base (960×640)': 'base', 'insta (756×945)': 'insta', 'talk session (756×945)': 'session', 'workshop (756×945)': 'workshop', 'crosstalk (756×945)': 'crosstalk' }
@@ -215,7 +314,12 @@ function setupPane() {
   tile.addBinding(PARAMS, 'randomOrder', { label: 'random order' });
   tile.addBinding(PARAMS, 'randomSeed', { label: 'seed', min: 0, max: 999, step: 1 });
   tile.addBinding(PARAMS, 'beltSpeed', { label: 'speed', min: 0, max: 5, step: 0.05 });
-  tile.addBinding(PARAMS, 'trackWidth', { label: 'track w', min: 1, max: 400, step: 1 });
+  tile.addBinding(PARAMS, 'appearSec', { label: 'appear sec', min: 0.1, max: 10, step: 0.1 });
+  tile.addBinding(PARAMS, 'noiseFreq', { label: 'noise freq', min: 1, max: 40, step: 1 });
+  tile.addBinding(PARAMS, 'appearMax', { label: 'appear max', min: 1, max: 300, step: 1 });
+  tile.addBinding(PARAMS, 'appearSettleSec', { label: 'settle sec', min: 0, max: 10, step: 0.1 });
+  tile.addBinding(PARAMS, 'appearEase', { label: 'appear ease', options: easingOptions() });
+  tile.addBinding(PARAMS, 'appearFps', { label: 'appear fps', min: 1, max: 60, step: 1 });
   tile.addBinding(PARAMS, 'minPointDist', { label: 'point step', min: 1, max: 100, step: 1 });
 
   const jitter = pane.addFolder({ title: 'Jitter' });
@@ -224,6 +328,7 @@ function setupPane() {
   jitter.addBinding(PARAMS, 'ampMax', { label: 'amount max', min: 0, max: 200, step: 0.5 });
   jitter.addBinding(PARAMS, 'ampSec', { label: 'amount sec', min: 0.1, max: 30, step: 0.1 });
   jitter.addBinding(PARAMS, 'ampFps', { label: 'amount fps', min: 1, max: 60, step: 1 });
+  jitter.addBinding(PARAMS, 'ampEase', { label: 'amount ease', options: easingOptions() });
   jitter.addBinding(PARAMS, 'ampWait', { label: 'amount wait', min: 0, max: 30, step: 0.1 });
   jitter.addBinding(PARAMS, 'pieceRotation', { label: 'rotation', min: -180, max: 180, step: 1 });
   jitter.addBinding(PARAMS, 'rotLoop', { label: 'rot loop' });
@@ -236,12 +341,10 @@ function setupPane() {
   jitter.addBinding(PARAMS, 'zoneSoftness', { label: 'softness', min: 0.001, max: 0.5, step: 0.001 });
 
   const palette = pane.addFolder({ title: 'Palette' });
-  palette.addBinding(PARAMS, 'showTrack', { label: 'show track' });
   palette.addBinding(PARAMS, 'showImage', { label: 'show image' });
   palette.addBinding(PARAMS, 'fillPath', { label: 'fill path' });
   palette.addBinding(PARAMS, 'fillColor', { label: 'fill color' });
   palette.addBinding(PARAMS, 'bkgdColor', { label: 'bg' });
-  palette.addBinding(PARAMS, 'trackColor', { label: 'track color' });
   palette.addBinding(PARAMS, 'circleColor', { label: 'piece color' });
 
   pane.addButton({ title: 'Import Path SVG' }).on('click', () => {
@@ -252,17 +355,55 @@ function setupPane() {
     input.click();
   });
   pane.addButton({ title: 'Reset Params' }).on('click', () => {
-    Object.assign(PARAMS, DEFAULT_PARAMS, { canvasMode: PARAMS.canvasMode }); // 今のモードだけ初期値に戻す
+    // 今のモード(パスが複数あるときは、選んでいるパス)だけ初期値に戻す
+    Object.assign(PARAMS, DEFAULT_PARAMS, pathDefaultsOf(canvasMode, curPath), { canvasMode: PARAMS.canvasMode });
     pane.refresh();
     saveParams();
   });
   pane.addButton({ title: 'Undo' }).on('click', undoTrack);
   pane.addButton({ title: 'Clear Canvas' }).on('click', () => { if (!activeTrack) removeAllTracks(); });
 
+  pane.addBinding(recSetting, 'on', { label: 'rec on reload' }).on('change', () => {
+    try { localStorage.setItem(REC_KEY, recSetting.on ? '1' : '0'); } catch (e) {}
+  });
   pane.addButton({ title: 'Export SVG' }).on('click', exportSVG);
-  pane.addButton({ title: 'Export PNG' }).on('click', () => saveCanvas('play-with-maker', 'png'));
+  pane.addButton({ title: 'Export PNG' }).on('click', () => saveCanvas(`play-with-maker_${canvasMode}_${stamp()}`, 'png'));
 
   pane.on('change', saveParams);
+  rebuildPathSelector();
+}
+
+// ------------------------------------------------------------
+// 初期パスが複数あるモードだけ、どのパスのスライダーを編集するかを選ぶプルダウンを出す
+// ------------------------------------------------------------
+const pathUI = { path: 0 };
+let pathBinding = null, canvasFolderRef = null;
+
+function rebuildPathSelector() {
+  if (!canvasFolderRef) return;
+  if (pathBinding) { pathBinding.dispose(); pathBinding = null; }
+  if (pathCount <= 1) return;
+  const options = {};
+  pathUrlsOf(canvasMode).forEach((u, i) => { options[u.split('/').pop().replace(/\.svg$/i, '')] = i; }); // 例: workshop_1 / workshop_2
+  pathUI.path = curPath;
+  pathBinding = canvasFolderRef.addBinding(pathUI, 'path', { label: 'path', options });
+  pathBinding.on('change', ev => switchPath(ev.value));
+}
+
+// 編集するパスを切り替える: 今のパスの値を控えて、選んだパスの値をスライダーに入れる
+function switchPath(i) {
+  if (i === curPath || i < 0 || i >= pathCount) return;
+  pathSlots[curPath] = pickPathParams();
+  curPath = i;
+  activePath = i;
+  switchingMode = true; // refreshで発火する 'change' による保存を止める
+  try {
+    Object.assign(PARAMS, pathSlots[curPath]);
+    pane.refresh();
+  } finally {
+    switchingMode = false;
+  }
+  saveParams();
 }
 
 let beltOffset = 0;
@@ -271,22 +412,53 @@ let beltOffset = 0;
 // setup / draw
 // ============================================================
 
-// 初期ピース(SVG。Export SVGでもベクターのまま書き出される)
-const DEFAULT_PIECES = ['tile.svg', 'tile2.svg', 'tile_3.svg', 'tile_4.svg'];
+// 今のモードの初期ピース(SVG。Export SVGでもベクターのまま書き出される)に入れ替える。
+// フォルダ内の piece1, piece2, ... を番号順に探して、途切れるまでの分だけ入れる(3つなら3つ、4つなら4つ)。
+// 自分で追加・差し替えしたピースは、モードを切り替えると初期ピースに戻る
+let shuffleOnLoad = true; // 最初の読み込みだけ、色をシャッフルして始める
+async function loadDefaultPieces() {
+  const name = canvasMode;
+  const fileOf = CANVAS_MODES[name].pieces;
 
-function loadDefaultPieces() {
-  DEFAULT_PIECES.forEach((url, i) => {
-    // SVGの文字列を読んでから、画面用にラスター化する(file:// などでfetchできない場合は、画像として読む)
-    fetch(url)
-      .then(r => { if (!r.ok) throw new Error(r.status); return r.text(); })
-      .then(text => {
-        const info = prepareSvgPiece(text);
-        if (!info) throw new Error('bad svg');
-        loadImage(info.rasterURL,
-          img => setPiece(i, limitPieceSize(img), { svgText: text, viewBox: info.viewBox }));
-      })
-      .catch(() => loadImage(url, img => setPiece(i, limitPieceSize(img), null)));
-  });
+  // 見つかった分だけ集める。fetchできない環境(file://)では、画像として読めるかで存在を調べる
+  const found = []; // { url, text|null }
+  for (let n = 1; n <= MAX_PIECES; n++) {
+    const url = fileOf(n);
+    let text = null;
+    try {
+      const r = await fetch(url);
+      if (!r.ok) break;
+      text = await r.text();
+    } catch (e) {
+      const ok = await new Promise(res => { const im = new Image(); im.onload = () => res(true); im.onerror = () => res(false); im.src = url; });
+      if (!ok) break;
+    }
+    found.push({ url, text });
+  }
+  if (name !== canvasMode) return; // 探している間にモードが切り替わった
+
+  pieces = found.map(() => null);
+  pathVar = [];
+  pieceMeta = found.map(() => null);
+  buildTintedImages();
+  renderTilePreview();
+  const put = (i, img, meta) => { if (name === canvasMode) setPiece(i, limitPieceSize(img), meta); };
+  const multi = pathCount > 1; // パスが複数のモードでは、共通ピースは元の色のまま、パスごとに別のシャッフルを掛ける
+  // リロード直後は、「Shuffle piece colors」を押した状態で始める(最初の読み込みだけ。モード切替では元の色)
+  const shuffleNow = shuffleOnLoad && SHUFFLE_COLOR_MODES.includes(name);
+  const shuffleShared = shuffleNow && !multi;
+  shuffleOnLoad = false;
+  const loads = found.map(({ url, text: orig }, i) => new Promise(done => {
+    const text = (shuffleShared && orig && shuffleSvgFills(orig)) || orig;
+    const info = text ? prepareSvgPiece(text) : null;
+    if (info) loadImage(info.rasterURL, img => { put(i, img, { svgText: text, viewBox: info.viewBox }); done(); }, done);
+    else loadImage(url, img => { put(i, img, null); done(); }, () => { console.warn('初期ピースを読み込めませんでした: ' + url); done(); });
+  }));
+  if (shuffleNow && multi) {
+    await Promise.all(loads);
+    if (name !== canvasMode) return;
+    for (let pi = 0; pi < pathCount; pi++) await makeVariant(pi);
+  }
 }
 
 function preload() {
@@ -298,6 +470,7 @@ function setup() {
   loadParams(); // 保存されたキャンバスモードを、キャンバスを作る前に読み込む
   canvasMode = CANVAS_MODES[PARAMS.canvasMode] ? PARAMS.canvasMode : 'base';
   PARAMS.canvasMode = canvasMode;
+  setupPathSlots(canvasMode, modeParams[canvasMode]); // パスごとのスライダー値を用意する
   const mode = CANVAS_MODES[canvasMode];
   baseImg = baseImgs[canvasMode];
   const cnv = createCanvas(mode.w, mode.h);
@@ -310,12 +483,14 @@ function setup() {
   });
 
   // 初期ピースは、起動後にSVGから読み込んで入れる(それまでは空の箱)
-  pieces = DEFAULT_PIECES.map(() => null);
-  pieceMeta = DEFAULT_PIECES.map(() => null);
+  pieces = [];
+  pieceMeta = [];
 
   syncParams();
   setupPane();
   setupTilePreview();
+  document.getElementById('shuffle-colors').addEventListener('click', shufflePieceColors);
+  updateShuffleButton();
   loadDefaultPieces();
   loadDefaultPath();
   buildTintedImages(); // circleColorで着色したtile画像を1回だけ生成する
@@ -347,15 +522,19 @@ function applyCanvasMode(name) {
   } finally {
     switchingMode = false;
   }
+  rebuildPathSelector(); // パスが複数あるモードだけ、パス選択のプルダウンを出す
   saveParams();
   baseImg = baseImgs[name];
   resizeCanvas(mode.w, mode.h);
   setCanvasCss(mode);
   loadDefaultPath();
+  loadDefaultPieces();
+  updateShuffleButton();
 }
 
 function draw() {
   syncParams();
+  recUpdate();
 
   if (USE_TRANSPARENT_BG) {
     clear();
@@ -364,12 +543,85 @@ function draw() {
   }
   if (baseImg && SHOW_IMAGE) image(baseImg, 0, 0, width, height); // 背景画像をキャンバスぴったりに
 
-  beltOffset += BELT_SPEED;
+  // コンベアは1コマごとに進む。録画中はコマ数が REC_FPS に落ちるので、見た目の速さが同じになるよう60fps相当に換算する
+  const beltMult = recState === 'rec' ? 60 / REC_FPS : 1;
+  for (let i = 0; i < pathCount; i++) beltOffsets[i] += (pathCount > 1 ? pathSlots[i].beltSpeed : BELT_SPEED) * beltMult; // パスごとの speed で流す
+  beltOffset = beltOffsets[curPath];
 
   // 線ごとに「トラック → そのピース」の順で描くので、後から描いた線は、
   // 先に描いた線のピースごと上に重なる
   drawTracksAndPieces();
+  recAfterDraw();
 }
+
+// ============================================================
+// 自動録画(p5.capture): リロード後、最初のピースが入った時点から REC_SEC 秒間を REC_FPS fps で連番PNG(ZIP)に保存する
+// 録画中はアニメーションの時刻を「コマ番号 ÷ fps」で進める(仮想時計)ので、書き出しが重くて描画が遅れても、
+// 動きの速さはずれない。ZIP は録画が終わったあとに1つにまとめてダウンロードされる
+// ============================================================
+// 「rec on reload」にチェックを入れると、リロードのたびに自動録画する(この設定はブラウザに保存。モードやパスとは無関係)
+const REC_KEY = 'conveyor-brush-autorec';
+const recSetting = { on: false };
+try { recSetting.on = localStorage.getItem(REC_KEY) === '1'; } catch (e) {}
+function autoRecord() { return recSetting.on; }
+const REC_FPS = 30;
+const REC_SEC = 10;
+
+let recState = 'wait';      // 'wait'(開始待ち) → 'rec'(録画中) → 'done'
+let recSeen = false;        // 録画が実際に始まったか
+let recIdleFrames = 0;      // 録画開始を指示してから、まだ始まっていない描画コマ数
+let recFrame = 0;           // 録画開始からの描画コマ数
+let recFilename = 'play-with-maker'; // 録画ごとに、開始時刻から付け直す
+function stamp() { // 例: 20261118_142530
+  const d = new Date(), z = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}${z(d.getMonth() + 1)}${z(d.getDate())}_${z(d.getHours())}${z(d.getMinutes())}${z(d.getSeconds())}`;
+}
+let recStartMs = 0;         // 録画開始時の時刻(ms)
+
+// アニメーションの時刻(ms)。録画中は仮想時計、それ以外は実時間
+function animMs() {
+  return recState === 'rec' ? recStartMs + recFrame * 1000 / REC_FPS : millis();
+}
+
+if (window.P5Capture) P5Capture.setDefaultOptions({ disableUi: true }); // 録画ボタンのUIは出さない
+
+function recCapture() { return window.P5Capture ? P5Capture.getInstance() : null; }
+
+// draw の最初に呼ぶ: 開始と終了の判定
+function recUpdate() {
+  if (!autoRecord()) return;
+  const cap = recCapture();
+  if (!cap) return;
+  if (recState === 'wait' && appearStart !== null) {
+    recState = 'rec';
+    recStartMs = millis();
+    recFilename = `play-with-maker_${canvasMode}_${stamp()}`;
+    recFrame = 0;
+    frameRate(REC_FPS);
+    pixelDensity(1); // 録画中は等倍(キャンバスサイズどおり: 756×945 など)で撮る。画像が小さくなり、メモリも軽い
+    cap.start({
+      format: 'png',
+      framerate: REC_FPS,
+      duration: REC_FPS * REC_SEC,
+      baseFilename: () => recFilename, // 録画を始めた時刻入り(毎回別の名前になる)
+      imageFilename: n => `${recFilename}_${String(n).padStart(5, '0')}`, // 1枚ずつの名前にも日時を入れる(連番は末尾の数字)
+    });
+  } else if (recState === 'rec') {
+    if (cap.state !== 'idle') recSeen = true;
+    else if (recSeen || ++recIdleFrames > 120) { // 書き出しまで終わった、または録画が始まらなかった(アニメが止まったままにならないよう打ち切る)
+      recState = 'done';
+      frameRate(60);
+      pixelDensity(displayDensity()); // 画面表示を高精細に戻す
+    }
+  }
+}
+
+// draw の最後に呼ぶ: 実際に録画しているコマだけ、仮想時計を進める
+function recAfterDraw() {
+  const cap = recCapture();
+  if (recState === 'rec' && cap && cap.state === 'capturing') recFrame++;
+}
+
 
 // ------------------------------------------------------------
 // ピースのプレビュー(右パネル)
@@ -632,6 +884,7 @@ function removePiece(i) {
   if (!canRemovePiece(i)) return;
   pieces.splice(i, 1);
   pieceMeta.splice(i, 1);
+  pathVar = [];
   buildTintedImages();
   renderTilePreview();
 }
@@ -677,6 +930,8 @@ function setPiece(i, img, meta) {
   if (i >= pieces.length) return; // 読み込み中に箱が削除された場合
   pieces[i] = img;
   pieceMeta[i] = meta;
+  pathVar = []; // ピースが変わったので、パスごとの色違いは破棄
+  if (appearStart === null) appearStart = animMs(); // 最初のピースが入った時点で出現アニメーションを始める(最初の1回だけ)
   buildTintedImages();
   renderTilePreview();
 }
@@ -715,17 +970,19 @@ function prepareSvgPiece(text) {
 // 今のモードの初期パス(SVG)を読み込む。前のモードの初期パスは取り除く(自分で描いた線・読み込んだ線は残す)
 function loadDefaultPath() {
   const name = canvasMode;
-  const url = CANVAS_MODES[name].path;
+  const urls = pathUrlsOf(name);
   tracks = tracks.filter(t => !t.isDefault);
-  if (!url) return; // blankモードは初期パスなし
-  fetch(url)
-    .then(r => { if (!r.ok) throw new Error(r.status); return r.text(); })
-    .then(text => {
-      if (name !== canvasMode) return; // 読み込み中にモードが切り替わった
-      tracks = tracks.filter(t => !t.isDefault);
-      importPathSvg(text, true);
-    })
-    .catch(e => console.warn('初期パスを読み込めませんでした: ' + url, e));
+  if (urls.length === 0) return; // blankモードは初期パスなし
+  // 全部読み終わってから、パスの番号順に追加する(読み込みの速さで重なり順が変わらないように)
+  Promise.all(urls.map(url =>
+    fetch(url)
+      .then(r => { if (!r.ok) throw new Error(r.status); return r.text(); })
+      .catch(e => { console.warn('初期パスを読み込めませんでした: ' + url, e); return null; })
+  )).then(texts => {
+    if (name !== canvasMode) return; // 読み込み中にモードが切り替わった
+    tracks = tracks.filter(t => !t.isDefault);
+    texts.forEach((text, i) => { if (text) importPathSvg(text, true, i); });
+  });
 }
 
 // ------------------------------------------------------------
@@ -738,7 +995,7 @@ function importPathSvgFile(file) {
   file.text().then(importPathSvg);
 }
 
-function importPathSvg(text, isDefault) {
+function importPathSvg(text, isDefault, pathIdx) {
   const data = parseSvgTracks(text, CURVE_STEPS);
   if (!data || data.subpaths.length === 0) {
     alert('SVGからパス(線)を読み込めませんでした');
@@ -773,7 +1030,7 @@ function importPathSvg(text, isDefault) {
     const closed = pts.length >= 4 && Math.hypot(pts[0].x - pts[pts.length - 1].x, pts[0].y - pts[pts.length - 1].y) < 0.5;
     if (closed) pts[pts.length - 1] = { x: pts[0].x, y: pts[0].y };
 
-    const track = { pts, segLens, total, group, fillable: true, closed, isDefault: !!isDefault }; // fillable: 閉じて塗りつぶせる(SVGから読み込んだ線)
+    const track = { pts, segLens, total, group, fillable: true, closed, isDefault: !!isDefault, pathIdx: isDefault ? (pathIdx || 0) : curPath }; // fillable: 閉じて塗りつぶせる(SVGから読み込んだ線)
     tracks.push(track);
     added++;
   });
@@ -791,7 +1048,8 @@ function mousePressed(e) {
   activeTrack = {
     pts: [{ x: mouseX, y: mouseY }],
     segLens: [],
-    total: 0
+    total: 0,
+    pathIdx: curPath // 描いた線は、選んでいるパスのスライダー値で流れる
   };
   tracks.push(activeTrack);
 }
@@ -842,7 +1100,40 @@ function keyPressed() {
 // ------------------------------------------------------------
 function buildTintedImages() {
   // 空の箱(null)は null のまま。描画側では画像の入っている箱だけを使う
-  tintedPieces = pieces.map(img => img ? tintImage(img, circleColor) : null);
+  tintCache = new Map(); // ピースが変わったので、色ごとの着色済みをすべて作り直す
+  tintedPieces = tintedSet(circleColor);
+}
+
+// 色 hex で着色した版(piecesと同じ並び)。パスごとに piece color が違えるよう、色ごとに1回だけ作って使い回す
+let tintCache = new Map();
+// パスごとのピース色違い(Shuffle piece colors をパスごとに効かせる)。pathVar[パス] = { id, pieces, meta }。なければ共通のピースを使う
+let pathVar = [];
+let variantSeq = 0;
+function tintedSet(hex, pi = activePath) {
+  const v = pathVar[pi];
+  const key = hex + '|' + (v ? v.id : 0);
+  let set = tintCache.get(key);
+  if (!set) {
+    set = (v ? v.pieces : pieces).map(img => img ? tintImage(img, hex) : null);
+    tintCache.set(key, set);
+  }
+  return set;
+}
+
+// パス pi 用に、今のピースの配色をシャッフルした色違いを作る(SVGピースのみ。ほかは共通のものを使う)
+async function makeVariant(pi) {
+  const srcMeta = pieceMeta.slice();
+  const outP = pieces.slice(), outM = srcMeta.slice();
+  await Promise.all(srcMeta.map(async (meta, i) => {
+    if (!meta || !meta.svgText) return;
+    const text = shuffleSvgFills(meta.svgText);
+    const info = text && prepareSvgPiece(text);
+    if (!info) return;
+    const img = await new Promise(res => loadImage(info.rasterURL, im => res(im), () => res(null)));
+    if (img) { outP[i] = limitPieceSize(img); outM[i] = { svgText: text, viewBox: info.viewBox }; }
+  }));
+  if (pieceMeta.length !== srcMeta.length || pieceMeta.some((m, i) => m !== srcMeta[i])) return; // 作っている間にピースが変わった
+  pathVar[pi] = { id: ++variantSeq, pieces: outP, meta: outM };
 }
 
 function tintImage(img, hexColor) {
@@ -966,10 +1257,10 @@ function pointAtExtendedDistance(track, distance) {
 // ピースは線の形でクリップしない(track w は、縁取りの太さだけに効く)。
 // ------------------------------------------------------------
 function drawTracksAndPieces() {
-  const items = getPieceItems();
-
-  const drawH = CIRCLE_DIAMETER;
-  const halfH = drawH / 2;
+  const multi = pathCount > 1;
+  let items = getPieceItems();
+  let drawH = currentPieceH();
+  let halfH = drawH / 2;
 
   // ★p5のpush/translate/rotate/image(状態管理のオーバーヘッドが大きい)を使わず、
   //   生のCanvas2D APIを直接呼ぶことで、画像枚数が多いときの描画コストを下げる
@@ -977,6 +1268,12 @@ function drawTracksAndPieces() {
   const ctx = drawingContext;
 
   tracks.forEach((track, idx) => {
+    if (multi) { // この線のパスのスライダー値で描く
+      usePathParams(Math.min(track.pathIdx || 0, pathCount - 1));
+      items = getPieceItems();
+      drawH = currentPieceH();
+      halfH = drawH / 2;
+    }
     if (FILL_PATH && track.fillable) drawPathFill(track);
     if (SHOW_TRACK) drawTrack(track);
     if (items.length === 0) return;
@@ -991,30 +1288,53 @@ function drawTracksAndPieces() {
       ctx.restore();
     });
   });
+  if (multi) usePathParams(curPath); // 選んでいるパスの値へ戻す
+}
+
+// ------------------------------------------------------------
+// 起動(リロード)直後の出現アニメーション: ピースが高さ1pxから、スライダーの大きさまで育つ
+// 間隔・配置は最初から設定どおりで、描く大きさだけが変わる
+// ------------------------------------------------------------
+let appearStart = null;   // 最初のピースが入った時刻。null の間は最小サイズ
+
+function currentPieceH() {
+  if (appearStart === null) return Math.min(1, CIRCLE_DIAMETER);
+  const dur = Math.max(0.1, PARAMS.appearSec) * 1000;
+  const settle = Math.max(0, PARAMS.appearSettleSec) * 1000;
+  const frame = 1000 / Math.max(1, PARAMS.appearFps); // コマ数を減らすため、経過時間をコマ単位に切り捨てる
+  const elapsed = Math.floor((animMs() - appearStart) / frame) * frame;
+  // 1) 1px → appear max まで育つ(dur)  2) appear max → piece size へ落ち着く(settle)。どちらも同じイージング
+  // back/elastic の In 系などで負になると、上下左右が反転して描かれる(そのまま動きとして使う)
+  if (elapsed < dur) return 1 + (PARAMS.appearMax - 1) * ease01(elapsed / dur, PARAMS.appearEase);
+  if (elapsed < dur + settle) return PARAMS.appearMax + (CIRCLE_DIAMETER - PARAMS.appearMax) * ease01((elapsed - dur) / settle, PARAMS.appearEase);
+  return CIRCLE_DIAMETER; // アニメが終わったら、設定の大きさ(piece size)
 }
 
 // ★画像の縦横比を保ったまま、高さをCIRCLE_DIAMETERに合わせた描画幅つきで、
 //   画像の入っている箱だけを返す。画面描画とSVG書き出しで共有する。
 //   k = piecesの添字、raw = 着色済みCanvas、w = 描画幅(px)
-function getPieceItems() {
-  const drawH = CIRCLE_DIAMETER;
+function getPieceItems(full) {
+  const drawH = full ? CIRCLE_DIAMETER : currentPieceH(); // 書き出しは、出現アニメーションに関係なく設定の大きさ
   const items = [];
-  pieces.forEach((img, k) => {
-    if (img && tintedPieces[k]) items.push({ k, raw: tintedPieces[k], w: drawH * (img.width / img.height) });
+  const tinted = tintedSet(PARAMS.circleColor);
+  const src = pathVar[activePath] ? pathVar[activePath].pieces : pieces;
+  src.forEach((img, k) => {
+    if (img && tinted[k]) items.push({ k, raw: tinted[k], w: drawH * (img.width / img.height) });
   });
   return items;
 }
 
 // ピースの出現割合。Piece番号(0始まり)ごとの重みで、書いていない箱は 1。
 // 今は全部均等(重み 1)。例: [1, 2] なら Piece2 が2倍の割合で出る。
-const PIECE_WEIGHTS = [];
+// モードごとの出現割合の重み(整数。ピースの並び順に指定。書かれていないものは1)
+const PIECE_WEIGHTS_BY_MODE = {};
 
 // 使うピース(getPieceItems の添字)を、重みの回数だけ並べた巡回パターンを返す。
 // 交互モードはこの並びを順に使い、ランダムモードはこの並びから選ぶ。
 // 例: 重みが 2,2,1,1 → [0,1,2,3,0,1]。同じピースが固まらないよう、1周ずつ回して並べる
 function piecePattern() {
   const items = getPieceItems();
-  const w = items.map(it => PIECE_WEIGHTS[it.k] ?? 1);
+  const w = items.map(it => (PIECE_WEIGHTS_BY_MODE[canvasMode] || [])[it.k] ?? 1);
   const pattern = [];
   const rounds = Math.max(1, ...w);
   for (let r = 0; r < rounds; r++) {
@@ -1129,7 +1449,7 @@ function forEachPlacement(track, idx, nItems, fn) {
     const rot = PIECE_ROTATION * Math.PI / 180;
     // ★ランダム順モードでは、スロット番号から固定の乱数で使うピースを選ぶ
     //   (slotIdは巡回に依存しないので、流れても同じ場所のピースは変わらない)
-    //   どちらのモードも、出現割合の重み(PIECE_WEIGHTS)を反映した並びから選ぶ
+    //   どちらのモードも、出現割合の重み(PIECE_WEIGHTS_BY_MODE)を反映した並びから選ぶ
     const L = pattern.length;
     //   ランダム順は、同じピースが MAX_RUN 個より多く続かないように選ぶ(randomPick)
     const n = RANDOM_ORDER
@@ -1148,7 +1468,7 @@ function forEachPlacement(track, idx, nItems, fn) {
 //   線ごとに <g> でまとめ、中に <use> でピースを配置(線の形でのクリップはしない)
 // ============================================================
 function exportSVG() {
-  const items = getPieceItems();
+  const items = getPieceItems(true);
   const liveTracks = tracks.filter(t => t !== activeTrack && t.pts.length >= 2 && t.total > 0);
   // 白い縁取りとクリップは、同じ間引き後の点を使う(別々だと縁がずれて見える)
   // 閉じた線は、重複している最後の点を除いた頂点列にする(形は closed 指定で閉じる)
@@ -1163,29 +1483,39 @@ function exportSVG() {
 
   const f = v => Math.round(v * 100) / 100;
   const drawH = CIRCLE_DIAMETER;
-  const tint = color(circleColor).levels;
-  const needsTint = tint[0] < 255 || tint[1] < 255 || tint[2] < 255;
   const serializer = new XMLSerializer();
 
-  // --- ピースの定義 ---
+  // --- ピースの定義(piece color ごとに1組。パスごとに色が違うと、その分だけ増える) ---
   let defs = '';
-  items.forEach(it => {
-    const id = 'piece-' + it.k;
-    const meta = pieceMeta[it.k];
-    if (meta) {
-      const root = new DOMParser().parseFromString(meta.svgText, 'image/svg+xml').documentElement;
-      if (needsTint) tintSvgColors(root, tint);
-      const inner = Array.from(root.childNodes).map(n => serializer.serializeToString(n)).join('');
-      const vb = meta.viewBox;
-      const s = drawH / vb.h;
-      // ピースの中心を原点に置き、高さがdrawHになるよう拡大縮小する
-      defs += `<g id="${id}" transform="scale(${s}) translate(${f(-(vb.minX + vb.w / 2))} ${f(-(vb.minY + vb.h / 2))})">${inner}</g>\n`;
-    } else {
-      // ラスター画像は、着色済みの画像をそのまま埋め込む(ベクターにはならない)
-      defs += `<image id="${id}" x="${f(-it.w / 2)}" y="${f(-drawH / 2)}" width="${f(it.w)}" height="${f(drawH)}" ` +
-              `xlink:href="${it.raw.toDataURL('image/png')}"/>\n`;
-    }
-  });
+  const colorIds = new Map(); // 色 → 定義の番号
+  const ensureDefs = (hex, pi) => {
+    const v = pathVar[pi];
+    const key = hex + '|' + (v ? v.id : 0); // 色と、色違いの組ごとに定義を作る
+    if (colorIds.has(key)) return colorIds.get(key);
+    const ci = colorIds.size;
+    colorIds.set(key, ci);
+    const tint = color(hex).levels;
+    const needsTint = tint[0] < 255 || tint[1] < 255 || tint[2] < 255;
+    const tinted = tintedSet(hex, pi);
+    items.forEach(it => {
+      const id = `piece-${it.k}-${ci}`;
+      const meta = (v ? v.meta : pieceMeta)[it.k];
+      if (meta) {
+        const root = new DOMParser().parseFromString(meta.svgText, 'image/svg+xml').documentElement;
+        if (needsTint) tintSvgColors(root, tint);
+        const inner = Array.from(root.childNodes).map(n => serializer.serializeToString(n)).join('');
+        const vb = meta.viewBox;
+        const s = drawH / vb.h;
+        // ピースの中心を原点に置き、高さがdrawHになるよう拡大縮小する
+        defs += `<g id="${id}" transform="scale(${s}) translate(${f(-(vb.minX + vb.w / 2))} ${f(-(vb.minY + vb.h / 2))})">${inner}</g>\n`;
+      } else {
+        // ラスター画像は、着色済みの画像をそのまま埋め込む(ベクターにはならない)
+        defs += `<image id="${id}" x="${f(-it.w / 2)}" y="${f(-drawH / 2)}" width="${f(it.w)}" height="${f(drawH)}" ` +
+                `xlink:href="${tinted[it.k].toDataURL('image/png')}"/>\n`;
+      }
+    });
+    return ci;
+  };
 
   // --- 線ごとのクリップとピース配置 ---
   // 線ごとに「トラックの縁取り → そのピース」の順に積む(後の線が上に重なる。画面と同じ)
@@ -1197,7 +1527,11 @@ function exportSVG() {
     body += `<image id="base" x="0" y="0" width="${width}" height="${height}" preserveAspectRatio="none" ` +
             `xlink:href="${baseImg.canvas.toDataURL('image/jpeg', 0.92)}"/>\n`;
   }
+  const refDiameter = CIRCLE_DIAMETER; // ピースの定義は、選んでいるパスの大きさで作る(ほかのパスは use 側で拡大縮小)
   liveTracks.forEach((track, n) => {
+    if (pathCount > 1) usePathParams(Math.min(track.pathIdx || 0, pathCount - 1));
+    const pieceScale = CIRCLE_DIAMETER / refDiameter;
+    const ci = ensureDefs(PARAMS.circleColor, activePath);
     if (FILL_PATH && track.fillable && track.pts.length >= 3) {
       const fpts = simplified.get(track).map(p => `${f(p.x)},${f(p.y)}`).join(' ');
       body += `<polygon id="fill-${n}" points="${fpts}" fill="${FILL_COLOR}"/>\n`; // polygonは自動で始点と終点がつながる
@@ -1211,11 +1545,12 @@ function exportSVG() {
     const idx = tracks.indexOf(track);
     let uses = '';
     forEachPlacement(track, idx, items.length, (n, x, y, angle) => {
-      uses += `<use xlink:href="#piece-${items[n].k}" transform="translate(${f(x)} ${f(y)}) rotate(${f(angle * 180 / Math.PI)})"/>\n`;
+      uses += `<use xlink:href="#piece-${items[n].k}-${ci}" transform="translate(${f(x)} ${f(y)}) rotate(${f(angle * 180 / Math.PI)})${pieceScale === 1 ? '' : ` scale(${f(pieceScale * 1000) / 1000})`}"/>\n`;
     });
     if (!uses) return;
     body += `<g id="line-${idx}">\n${uses}</g>\n`;
   });
+  if (pathCount > 1) usePathParams(curPath);
 
   const svg =
     `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" ` +
@@ -1226,7 +1561,7 @@ function exportSVG() {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = 'play-with-maker.svg';
+  a.download = `play-with-maker_${canvasMode}_${stamp()}.svg`;
   a.click();
   URL.revokeObjectURL(url);
 }
@@ -1256,6 +1591,66 @@ function simplifyPolyline(pts, epsilon) {
     }
   }
   return pts.filter((_, i) => keep[i]);
+}
+
+// ------------------------------------------------------------
+// ピースSVGの塗りつぶし色(fill)を、完全にランダムな色(RGB全体から)へ入れ替える
+// 同じ色は同じ色へ(1つのピース内で、元が同じ色の場所は入れ替え後も同じ色)。
+// none / url(...) / currentColor は触らない
+// ------------------------------------------------------------
+const SHUFFLE_COLOR_MODES = ['blank', 'base', 'insta', 'session', 'workshop', 'crosstalk']; // この機能を使えるモード
+
+function randomHexColor() {
+  return '#' + Array.from({ length: 3 }, () => Math.floor(Math.random() * 256).toString(16).padStart(2, '0')).join('');
+}
+
+function shuffleSvgFills(text) {
+  const doc = new DOMParser().parseFromString(text, 'image/svg+xml');
+  const root = doc.documentElement;
+  if (!root || root.nodeName.toLowerCase() !== 'svg' || doc.querySelector('parsererror')) return null;
+
+  const map = new Map(); // 元の色(小文字・空白なし) → 新しい色
+  const SKIP = /^(none|transparent|currentcolor|inherit)$/i;
+  const swap = v => {
+    const t = v.trim();
+    if (!t || SKIP.test(t) || t.startsWith('url(')) return v;
+    const key = t.toLowerCase().replace(/\s+/g, '');
+    if (!map.has(key)) map.set(key, randomHexColor());
+    return map.get(key);
+  };
+
+  [root, ...root.querySelectorAll('*')].forEach(el => {
+    const attr = el.getAttribute('fill');
+    if (attr) el.setAttribute('fill', swap(attr));
+    const style = el.getAttribute('style');
+    if (style) el.setAttribute('style', style.replace(/(^|;)(\s*fill\s*:\s*)([^;]+)/g, (m, a, b, c) => a + b + swap(c)));
+    if (el.nodeName.toLowerCase() === 'style') { // <style> 内の .cls { fill: ... }
+      el.textContent = el.textContent.replace(/(fill\s*:\s*)([^;}]+)/g, (m, a, b) => a + swap(b));
+    }
+  });
+  return new XMLSerializer().serializeToString(root);
+}
+
+// 今のピース(SVG)すべての配色をシャッフルする。ラスター画像のピースは対象外
+function shufflePieceColors() {
+  if (!SHUFFLE_COLOR_MODES.includes(canvasMode)) return;
+  if (pathCount > 1) { makeVariant(curPath); return; } // パスが複数のモードでは、選んでいるパスだけシャッフルする
+  pieces.forEach((img, i) => {
+    const meta = pieceMeta[i];
+    if (!meta || !meta.svgText) return;
+    const text = shuffleSvgFills(meta.svgText);
+    const info = text && prepareSvgPiece(text);
+    if (!info) return;
+    loadImage(info.rasterURL, newImg => {
+      if (pieceMeta[i] !== meta) return; // 読み込み中に入れ替わった箱は触らない
+      setPiece(i, limitPieceSize(newImg), { svgText: text, viewBox: info.viewBox });
+    });
+  });
+}
+
+function updateShuffleButton() {
+  const shuffleBtn = document.getElementById('shuffle-colors');
+  if (shuffleBtn) shuffleBtn.disabled = !SHUFFLE_COLOR_MODES.includes(canvasMode);
 }
 
 // SVGの色指定(fill / stroke / stop-color / flood-color と style 属性内)に、
